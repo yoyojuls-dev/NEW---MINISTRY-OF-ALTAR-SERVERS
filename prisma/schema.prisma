@@ -1,0 +1,464 @@
+// prisma/schema.prisma
+// Ministry of Altar Servers Management System - MongoDB Schema
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ===== USER MANAGEMENT MODELS =====
+
+// Admin/Ministry Leader Model
+model AdminUser {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  adminId       String?  @unique
+  name          String
+  birthdate     DateTime?
+  email         String?  @unique
+  emailVerified DateTime?
+  image         String?
+  hashedPassword String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  role          Role     @default(ADMIN)
+  
+  // Admin-specific fields
+  permissions   String[]
+  position      String?
+  contactNumber String?
+  isActive      Boolean  @default(true)
+  
+  // Relations
+  accounts              Account[]         @relation("AdminAccounts")
+  createdMembers        Member[]          @relation("CreatedByAdmin")
+  createdEvents         Event[]           @relation("CreatedByAdmin")
+  createdMinistryEvents MinistryEvent[]   @relation("CreatedMinistryEvents")
+  attendanceRecords     Attendance[]      @relation("RecordedByAdmin")
+  financialRecords      FinancialRecord[] @relation("RecordedByAdmin")
+}
+
+// Ministry Events (Retreats, Training, etc.)
+model MinistryEvent {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Event Details
+  title       String
+  date        DateTime
+  time        String    // Store as "HH:mm" format
+  conductor   String    // Person conducting the event
+  purpose     String    // Detailed purpose/description
+  year        Int       // For easy filtering by year
+  
+  // Status and Management
+  status      EventStatus @default(SCHEDULED)
+  location    String?
+  notes       String?
+  
+  // Record Information
+  createdBy       AdminUser @relation("CreatedMinistryEvents", fields: [createdByUserId], references: [id])
+  createdByUserId String    @db.ObjectId
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([date])
+  @@index([year])
+  @@index([status])
+}
+
+// Altar Server Member Model
+model Member {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Name fields
+  surname       String   // Last name (e.g., "Dela Cruz")
+  givenName     String   // First/given names (e.g., "Juan" or "Maria Clara")
+  
+  birthdate     DateTime
+  email         String?  @unique
+  emailVerified DateTime?
+  image         String?
+  hashedPassword String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  role          Role     @default(USER)
+  
+  // Member-specific fields
+  contactNumber String?
+  address       String?
+  parentGuardian String?
+  parentContact  String?
+  emergencyContact String?
+  emergencyNumber String?
+  
+  // Ministry Information
+  dateJoined    DateTime @default(now())
+  memberStatus  MemberStatus @default(ACTIVE)
+  serverLevel   ServerLevel @default(JUNIOR)
+  trainedFor    String[]
+  
+  // Additional Information
+  school        String?
+  occupation    String?
+  notes         String?
+  
+  // Relations
+  accounts            Account[]           @relation("MemberAccounts")
+  attendanceRecords   Attendance[]        @relation("MemberAttendance")
+  financialRecords    FinancialRecord[]   @relation("MemberFinances")
+  eventParticipation  EventParticipant[]  @relation("MemberParticipation")
+  officers            Officer[]           @relation("MemberOfficer")
+  createdBy           AdminUser           @relation("CreatedByAdmin", fields: [createdByUserId], references: [id])
+  createdByUserId     String              @db.ObjectId
+  
+  // Indexes (non-unique fields only)
+  @@index([memberStatus])
+  @@index([birthdate])
+  @@index([dateJoined])
+  @@index([surname])
+}
+
+// Account model for authentication
+model Account {
+  id                 String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String  @db.ObjectId
+  userType           UserType
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?
+  access_token       String?
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?
+  session_state      String?
+
+  // Relations
+  adminUser     AdminUser?   @relation("AdminAccounts", fields: [adminUserId], references: [id], onDelete: Cascade)
+  adminUserId   String?      @db.ObjectId
+  
+  member        Member?      @relation("MemberAccounts", fields: [memberId], references: [id], onDelete: Cascade)
+  memberId      String?      @db.ObjectId
+
+  @@unique([provider, providerAccountId])
+}
+
+// ===== ATTENDANCE MANAGEMENT MODELS =====
+
+model Attendance {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Member Information
+  memberId String @db.ObjectId
+  member   Member @relation("MemberAttendance", fields: [memberId], references: [id], onDelete: Cascade)
+  
+  // Event/Service Information
+  eventType    AttendanceType
+  eventDate    DateTime
+  serviceTime  String?
+  
+  // Attendance Details
+  status       AttendanceStatus @default(PRESENT)
+  arrivalTime  DateTime?
+  notes        String?
+  
+  // Record Information
+  recordedBy       AdminUser @relation("RecordedByAdmin", fields: [recordedByUserId], references: [id])
+  recordedByUserId String    @db.ObjectId
+  recordedAt       DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  @@index([memberId])
+  @@index([eventDate])
+  @@index([eventType])
+  @@index([status])
+}
+
+// ===== EVENT MANAGEMENT MODELS =====
+
+model Event {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Event Details
+  title         String
+  description   String?
+  eventType     EventType
+  date          DateTime
+  startTime     String
+  endTime       String?
+  location      String?
+  
+  // Event Configuration
+  requiresAttendance Boolean @default(true)
+  maxParticipants    Int?
+  minServerLevel     ServerLevel?
+  
+  // Status and Management
+  status        EventStatus @default(SCHEDULED)
+  notes         String?
+  
+  // Record Information
+  createdBy       AdminUser @relation("CreatedByAdmin", fields: [createdByUserId], references: [id])
+  createdByUserId String    @db.ObjectId
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  participants  EventParticipant[]
+  
+  @@index([date])
+  @@index([eventType])
+  @@index([status])
+}
+
+model EventParticipant {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  eventId  String @db.ObjectId
+  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  memberId String @db.ObjectId
+  member   Member @relation("MemberParticipation", fields: [memberId], references: [id], onDelete: Cascade)
+  
+  // Participation Details
+  role     String?
+  status   ParticipationStatus @default(REGISTERED)
+  notes    String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([eventId])
+  @@index([memberId])
+}
+
+// ===== FINANCIAL MANAGEMENT MODELS =====
+
+model FinancialRecord {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Transaction Details
+  type          TransactionType
+  amount        Float
+  description   String
+  category      String?
+  
+  // Member Association
+  memberId      String? @db.ObjectId
+  member        Member? @relation("MemberFinances", fields: [memberId], references: [id])
+  
+  // Payment Details
+  paymentMethod String?
+  referenceNumber String?
+  
+  // Date Information
+  transactionDate DateTime
+  dueDate       DateTime?
+  
+  // Status
+  status        PaymentStatus @default(PENDING)
+  notes         String?
+  
+  // Record Information
+  recordedBy       AdminUser @relation("RecordedByAdmin", fields: [recordedByUserId], references: [id])
+  recordedByUserId String    @db.ObjectId
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  @@index([type])
+  @@index([transactionDate])
+  @@index([memberId])
+  @@index([status])
+}
+
+// ===== MINISTRY SETTINGS AND CONFIGURATION =====
+
+model MinistrySettings {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // General Settings
+  ministryName    String @default("Ministry of Altar Servers")
+  parishName      String?
+  contactEmail    String?
+  contactNumber   String?
+  
+  // Dues Configuration
+  monthlyDuesAmount Float @default(0)
+  duesDescription   String?
+  
+  // Attendance Settings
+  attendanceGracePeriod Int @default(15)
+  
+  // Notification Settings
+  birthdayReminders     Boolean @default(true)
+  eventReminders        Boolean @default(true)
+  duesReminders         Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===== OFFICER MANAGEMENT =====
+
+model Officer {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  memberId String @db.ObjectId
+  member   Member @relation("MemberOfficer", fields: [memberId], references: [id], onDelete: Cascade)
+  
+  position String
+  dateAppointed DateTime
+  isActive Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([memberId])
+  @@index([position])
+  @@index([isActive])
+}
+
+// ===== NOTIFICATION SYSTEM =====
+
+model Notification {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  
+  // Notification Details
+  title       String
+  message     String
+  type        NotificationType
+  priority    Priority @default(NORMAL)
+  
+  // Target
+  targetType  TargetType
+  targetId    String? @db.ObjectId
+  
+  // Status
+  isRead      Boolean @default(false)
+  readAt      DateTime?
+  
+  // Schedule
+  scheduledFor DateTime?
+  sentAt      DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([targetType])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ===== ENUMS =====
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum UserType {
+  ADMIN
+  MEMBER
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+  TRANSFERRED
+  SUSPENDED
+}
+
+enum ServerLevel {
+  JUNIOR
+  SENIOR
+  MASTER
+}
+
+enum AttendanceType {
+  SUNDAY_MASS
+  DAILY_MASS
+  MONTHLY_MEETING
+  SPECIAL_EVENT
+  TRAINING
+  RETREAT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  EXCUSED
+  LATE
+  EARLY_DEPARTURE
+}
+
+enum EventType {
+  SUNDAY_MASS
+  DAILY_MASS
+  SPECIAL_MASS
+  HOLY_DAY
+  RETREAT
+  TRAINING
+  MEETING
+  SOCIAL_EVENT
+  COMMUNITY_SERVICE
+}
+
+enum EventStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+  POSTPONED
+}
+
+enum ParticipationStatus {
+  REGISTERED
+  CONFIRMED
+  ATTENDED
+  ABSENT
+  CANCELLED
+}
+
+enum TransactionType {
+  DUES
+  DONATION
+  EXPENSE
+  COLLECTION
+  PENALTY
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum NotificationType {
+  BIRTHDAY
+  EVENT_REMINDER
+  DUES_REMINDER
+  ANNOUNCEMENT
+  SCHEDULE_CHANGE
+  URGENT
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TargetType {
+  ALL_MEMBERS
+  SPECIFIC_MEMBER
+  ADMINS_ONLY
+  ACTIVE_MEMBERS_ONLY
+}
