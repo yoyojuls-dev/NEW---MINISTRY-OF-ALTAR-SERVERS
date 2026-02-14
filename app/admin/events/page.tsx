@@ -51,59 +51,30 @@ export default function EventsPage() {
         router.push('/member/dashboard');
         return;
       }
-      loadSampleEvents();
+      fetchEvents();
     } else if (status === 'unauthenticated') {
       router.push('/admin/login');
     }
   }, [status, session, router]);
-
-  const loadSampleEvents = () => {
-    // Sample events for demonstration
-    const sampleEvents: Event[] = [
-      {
-        id: '1',
-        title: 'Annual Ministry Retreat',
-        date: '2026-03-15',
-        time: '09:00',
-        conductor: 'Fr. John Smith',
-        purpose: 'Spiritual renewal and team building for all altar servers',
-        year: 2026,
-        createdAt: new Date('2026-01-10'),
-      },
-      {
-        id: '2',
-        title: 'Holy Week Training',
-        date: '2026-04-05',
-        time: '14:00',
-        conductor: 'Deacon Michael Brown',
-        purpose: 'Preparation and practice for Holy Week liturgies',
-        year: 2026,
-        createdAt: new Date('2026-01-15'),
-      },
-      {
-        id: '3',
-        title: 'New Members Orientation',
-        date: '2026-02-20',
-        time: '15:00',
-        conductor: 'Ministry Coordinator',
-        purpose: 'Introduction to altar serving duties and responsibilities',
-        year: 2026,
-        createdAt: new Date('2026-01-20'),
-      },
-      {
-        id: '4',
-        title: 'Christmas Mass Preparation',
-        date: '2026-12-15',
-        time: '16:00',
-        conductor: 'Fr. John Smith',
-        purpose: 'Rehearsal for Christmas Eve and Christmas Day masses',
-        year: 2026,
-        createdAt: new Date('2026-01-25'),
-      },
-    ];
-    
-    setEvents(sampleEvents);
-    setIsLoading(false);
+  const fetchEvents = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch('/api/events');
+      if (!res.ok) throw new Error('Failed to fetch events');
+      const data = await res.json();
+      // Ensure dates are strings for client usage
+      const normalized: Event[] = data.map((e: any) => ({
+        ...e,
+        date: e.date,
+        createdAt: e.createdAt ? new Date(e.createdAt) : new Date(),
+      }));
+      setEvents(normalized);
+    } catch (err) {
+      console.error(err);
+      toast.error('Could not load events');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCreateEvent = () => {
@@ -111,41 +82,46 @@ export default function EventsPage() {
       toast.error('Please fill in all fields');
       return;
     }
-
-    const eventYear = new Date(formData.date).getFullYear();
-    
-    const newEvent: Event = {
-      id: Date.now().toString(),
-      title: formData.title,
-      date: formData.date,
-      time: formData.time,
-      conductor: formData.conductor,
-      purpose: formData.purpose,
-      year: eventYear,
-      createdAt: new Date(),
-    };
-
-    setEvents([...events, newEvent]);
-    
-    // Reset form
-    setFormData({
-      title: '',
-      date: '',
-      time: '10:00',
-      conductor: '',
-      purpose: '',
-    });
-
-    toast.success('Event created successfully!');
-    setActiveTab('events');
+    // Send to API
+    (async () => {
+      try {
+        const res = await fetch('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+        if (!res.ok) throw new Error('Failed to create event');
+        const created = await res.json();
+        const createdEvent: Event = {
+          ...created,
+          date: created.date,
+          createdAt: created.createdAt ? new Date(created.createdAt) : new Date(),
+        };
+        setEvents((prev) => [...prev, createdEvent]);
+        setFormData({ title: '', date: '', time: '10:00', conductor: '', purpose: '' });
+        toast.success('Event created successfully!');
+        setActiveTab('events');
+      } catch (err) {
+        console.error(err);
+        toast.error('Could not create event');
+      }
+    })();
   };
 
   const handleDeleteEvent = (eventId: string) => {
     if (!confirm('Are you sure you want to delete this event?')) return;
-    
-    setEvents(events.filter(e => e.id !== eventId));
-    setShowEventDetailModal(false);
-    toast.success('Event deleted');
+    (async () => {
+      try {
+        const res = await fetch(`/api/events/${eventId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete event');
+        setEvents((prev) => prev.filter((e) => e.id !== eventId));
+        setShowEventDetailModal(false);
+        toast.success('Event deleted');
+      } catch (err) {
+        console.error(err);
+        toast.error('Could not delete event');
+      }
+    })();
   };
 
   const handleEventClick = (event: Event) => {

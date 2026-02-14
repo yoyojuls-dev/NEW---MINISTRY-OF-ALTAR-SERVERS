@@ -1,4 +1,4 @@
-/* app/admin/page.tsx */
+// app/admin/dashboard/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';

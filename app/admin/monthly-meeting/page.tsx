@@ -211,50 +211,73 @@ export default function MonthlyMeetingPage() {
 
   useEffect(() => {
     if (members.length > 0) {
-      generateMemberDuesRecords();
+      fetchMemberDuesRecords();
     }
-  }, [members]);
+  }, [members, selectedYear]);
+  const fetchMemberDuesRecords = async () => {
+    try {
+      const res = await fetch(`/api/financial/dues?year=${selectedYear}`);
+      if (!res.ok) throw new Error('Failed to fetch dues');
+      const body = await res.json();
+      const results: any[] = body.results || [];
 
-  const generateMemberDuesRecords = () => {
-    // Generate sample dues records for each member
-    const duesRecords: MemberDuesRecord[] = members.map((member) => {
-      const monthlyDues = [];
-      let totalPaid = 0;
-      
-      // Generate payment history (sample data - replace with actual API call)
-      for (let i = 0; i < 12; i++) {
-        const isPaid = Math.random() > 0.3; // 70% chance of payment
-        const amountPaid = isPaid ? MONTHLY_DUE_AMOUNT : 0;
-        
-        monthlyDues.push({
-          month: i,
-          year: selectedYear,
-          amountPaid,
-          datePaid: isPaid ? `${selectedYear}-${String(i + 1).padStart(2, '0')}-15` : undefined,
+      const duesRecords: MemberDuesRecord[] = members.map((member) => {
+        const memberPayments = results.find(r => r.memberId === member.id)?.payments || [];
+
+        // prepare monthly dues for the year
+        const monthlyDues = Array.from({ length: 12 }).map((_, i) => {
+          const paymentsInMonth = memberPayments.filter((p: any) => {
+            const d = new Date(p.date);
+            return d.getFullYear() === selectedYear && d.getMonth() === i;
+          });
+          const amountPaid = paymentsInMonth.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+          const datePaid = paymentsInMonth.length ? paymentsInMonth[0].date : undefined;
+          return { month: i, year: selectedYear, amountPaid, datePaid };
         });
-        
-        totalPaid += amountPaid;
-      }
-      
-      const monthsElapsed = currentMonth + 1;
-      const totalDue = monthsElapsed * MONTHLY_DUE_AMOUNT;
-      
-      let status: 'FULLY_PAID' | 'HAS_DUES' | 'PAID_ADVANCE' = 'HAS_DUES';
-      if (totalPaid >= totalDue) {
-        status = totalPaid > totalDue ? 'PAID_ADVANCE' : 'FULLY_PAID';
-      }
-      
-      return {
-        memberId: member.id,
-        memberName: formatMemberName(member.surname, member.givenName),
-        monthlyDues,
-        totalPaid,
-        totalDue,
-        status,
-      };
-    });
-    
-    setMemberDuesRecords(duesRecords);
+
+        const totalPaid = monthlyDues.reduce((s, m) => s + (m.amountPaid || 0), 0);
+        const monthsElapsed = currentMonth + 1;
+        const totalDue = monthsElapsed * MONTHLY_DUE_AMOUNT;
+
+        let status: 'FULLY_PAID' | 'HAS_DUES' | 'PAID_ADVANCE' = 'HAS_DUES';
+        if (totalPaid >= totalDue) {
+          status = totalPaid > totalDue ? 'PAID_ADVANCE' : 'FULLY_PAID';
+        }
+
+        return {
+          memberId: member.id,
+          memberName: formatMemberName(member.surname, member.givenName),
+          monthlyDues,
+          totalPaid,
+          totalDue,
+          status,
+        };
+      });
+
+      setMemberDuesRecords(duesRecords);
+    } catch (err) {
+      console.error('Error fetching member dues records:', err);
+      // fallback to generated sample if API fails
+      const duesRecords: MemberDuesRecord[] = members.map((member) => {
+        const monthlyDues = [];
+        let totalPaid = 0;
+        for (let i = 0; i < 12; i++) {
+          const amountPaid = 0;
+          monthlyDues.push({ month: i, year: selectedYear, amountPaid, datePaid: undefined });
+        }
+        const monthsElapsed = currentMonth + 1;
+        const totalDue = monthsElapsed * MONTHLY_DUE_AMOUNT;
+        return {
+          memberId: member.id,
+          memberName: formatMemberName(member.surname, member.givenName),
+          monthlyDues,
+          totalPaid,
+          totalDue,
+          status: 'HAS_DUES',
+        };
+      });
+      setMemberDuesRecords(duesRecords);
+    }
   };
 
   const handleMemberDuesClick = (duesRecord: MemberDuesRecord) => {
@@ -360,42 +383,61 @@ export default function MonthlyMeetingPage() {
 
   const handlePresentChange = (memberId: string) => {
     if (!isCurrentMonth) return;
-    
-    setAttendance(prev => ({
-      ...prev,
-      [memberId]: {
-        ...prev[memberId],
-        present: !prev[memberId]?.present,
-        absent: false,
-      }
-    }));
+
+    setAttendance(prev => {
+      const prevState = prev[memberId] || {};
+      const newPresent = !prevState.present;
+      return {
+        ...prev,
+        [memberId]: {
+          ...prevState,
+          present: newPresent,
+          // if setting present true, clear other statuses to enforce exclusivity
+          absent: newPresent ? false : prevState.absent,
+          excused: newPresent ? false : prevState.excused,
+        }
+      };
+    });
     setHasUnsavedChanges(true);
   };
 
   const handleAbsentChange = (memberId: string) => {
     if (!isCurrentMonth) return;
-    
-    setAttendance(prev => ({
-      ...prev,
-      [memberId]: {
-        ...prev[memberId],
-        absent: !prev[memberId]?.absent,
-        present: false,
-      }
-    }));
+
+    setAttendance(prev => {
+      const prevState = prev[memberId] || {};
+      const newAbsent = !prevState.absent;
+      return {
+        ...prev,
+        [memberId]: {
+          ...prevState,
+          absent: newAbsent,
+          // if setting absent true, clear other statuses
+          present: newAbsent ? false : prevState.present,
+          excused: newAbsent ? false : prevState.excused,
+        }
+      };
+    });
     setHasUnsavedChanges(true);
   };
 
   const handleExcusedChange = (memberId: string) => {
     if (!isCurrentMonth) return;
-    
-    setAttendance(prev => ({
-      ...prev,
-      [memberId]: {
-        ...prev[memberId],
-        excused: !prev[memberId]?.excused,
-      }
-    }));
+
+    setAttendance(prev => {
+      const prevState = prev[memberId] || {};
+      const newExcused = !prevState.excused;
+      return {
+        ...prev,
+        [memberId]: {
+          ...prevState,
+          excused: newExcused,
+          // if setting excused true, clear other statuses
+          present: newExcused ? false : prevState.present,
+          absent: newExcused ? false : prevState.absent,
+        }
+      };
+    });
     setHasUnsavedChanges(true);
   };
 
@@ -1185,17 +1227,17 @@ export default function MonthlyMeetingPage() {
 
       {/* Dues Summary Modal */}
       {showDuesSummaryModal && selectedMemberDues && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div 
-              className="text-white p-6 rounded-t-2xl"
-              style={{
-                background: 'linear-gradient(135deg, #4169E1 0%, #000080 100%)'
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold flex items-center space-x-2">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-sm sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto mx-2">
+              <div 
+                className="text-white p-4 rounded-t-2xl"
+                style={{
+                  background: 'linear-gradient(135deg, #4169E1 0%, #000080 100%)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold flex items-center space-x-2">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
@@ -1214,24 +1256,24 @@ export default function MonthlyMeetingPage() {
               </div>
             </div>
 
-            <div className="p-6">
+            <div className="p-4">
               {/* Summary Cards */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 text-center">
-                  <p className="text-sm text-gray-600 mb-1">Total Paid</p>
-                  <p className="text-2xl font-bold text-blue-600">₱{selectedMemberDues.totalPaid.toFixed(2)}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-600 mb-1">Total Paid</p>
+                  <p className="text-xl font-bold text-blue-600">₱{selectedMemberDues.totalPaid.toFixed(2)}</p>
                 </div>
-                <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
-                  <p className="text-sm text-gray-600 mb-1">Total Due</p>
-                  <p className="text-2xl font-bold text-orange-600">₱{selectedMemberDues.totalDue.toFixed(2)}</p>
+                <div className="bg-orange-50 border-2 border-orange-200 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-600 mb-1">Total Due</p>
+                  <p className="text-xl font-bold text-orange-600">₱{selectedMemberDues.totalDue.toFixed(2)}</p>
                 </div>
-                <div className={`border-2 rounded-xl p-4 text-center ${
+                <div className={`border-2 rounded-lg p-3 text-center ${
                   selectedMemberDues.totalPaid >= selectedMemberDues.totalDue
                     ? 'bg-green-50 border-green-200'
                     : 'bg-red-50 border-red-200'
                 }`}>
-                  <p className="text-sm text-gray-600 mb-1">Balance</p>
-                  <p className={`text-2xl font-bold ${
+                  <p className="text-xs text-gray-600 mb-1">Balance</p>
+                  <p className={`text-xl font-bold ${
                     selectedMemberDues.totalPaid >= selectedMemberDues.totalDue
                       ? 'text-green-600'
                       : 'text-red-600'
@@ -1243,20 +1285,20 @@ export default function MonthlyMeetingPage() {
               </div>
 
               {/* Status Badge */}
-              <div className="mb-6 flex justify-center">
-                <span className={`px-4 py-2 rounded-full text-sm font-bold border-2 ${getDuesStatusColor(selectedMemberDues.status)}`}>
+              <div className="mb-4 flex justify-center">
+                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getDuesStatusColor(selectedMemberDues.status)}`}>
                   {getDuesStatusText(selectedMemberDues.status)}
                 </span>
               </div>
 
               {/* Monthly Payment History */}
               <div>
-                <h4 className="text-lg font-bold text-gray-900 mb-4">Monthly Payment History ({selectedYear})</h4>
-                <div className="space-y-2 max-h-96 overflow-y-auto">
+                <h4 className="text-base font-bold text-gray-900 mb-3">Monthly Payment History ({selectedYear})</h4>
+                <div className="space-y-2 max-h-72 overflow-y-auto">
                   {selectedMemberDues.monthlyDues.map((monthData, index) => (
                     <div 
                       key={index}
-                      className={`flex items-center justify-between p-4 rounded-lg border-2 ${
+                      className={`flex items-center justify-between p-3 rounded-lg border-2 ${
                         monthData.amountPaid > 0
                           ? 'bg-green-50 border-green-200'
                           : index <= currentMonth
@@ -1296,7 +1338,7 @@ export default function MonthlyMeetingPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className={`text-lg font-bold ${
+                        <p className={`text-base font-bold ${
                           monthData.amountPaid > 0
                             ? 'text-green-700'
                             : index <= currentMonth
@@ -1315,13 +1357,13 @@ export default function MonthlyMeetingPage() {
               </div>
 
               {/* Close Button */}
-              <div className="mt-6">
+              <div className="mt-4">
                 <button
                   onClick={() => setShowDuesSummaryModal(false)}
                   style={{
                     background: 'linear-gradient(135deg, #4169E1 0%, #000080 100%)'
                   }}
-                  className="w-full px-6 py-3 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity"
+                  className="w-full px-4 py-2 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity text-sm"
                 >
                   Close
                 </button>

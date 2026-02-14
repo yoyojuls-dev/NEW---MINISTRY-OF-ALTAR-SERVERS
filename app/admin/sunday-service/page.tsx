@@ -1,3 +1,4 @@
+// app/admin/sunday-service/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -307,7 +308,7 @@ export default function SundayGroupsPage() {
             {selectedListGroup && (
               <div className="mt-6">
                 <h4 className="text-md font-semibold text-gray-900 mb-3">
-                  Members in "{selectedListGroup}"
+                  Members in '{selectedListGroup}'
                 </h4>
                 <div className="bg-white rounded-lg shadow-sm border-2 border-gray-100 overflow-hidden">
                   {(groups[selectedListGroup] || []).length === 0 ? (
